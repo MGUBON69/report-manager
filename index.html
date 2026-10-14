@@ -15,9 +15,9 @@
 <aside class="sidebar">
   <div class="brand">M2 <span style="color:#ff4050">MOTORSPORT</span><small>MG BOOKING CONTROL</small></div>
   <nav class="nav">
-    <button class="active" data-page="dashboard">▦ Dashboard</button>
-    <button data-page="bookings">▤ Booking ทั้งหมด</button>
-    <button data-page="reports">▥ รายงาน</button>
+    <button class="active" data-page="dashboard">▦　Dashboard</button>
+    <button data-page="bookings">▤　Booking ทั้งหมด</button>
+    <button data-page="reports">▥　รายงาน</button>
   </nav>
   <div class="side-note">ระบบจัดการ Booking สำหรับ MG<br>Google Sheets เป็นฐานข้อมูลหลัก<br><br><span id="connection">กำลังเชื่อมต่อ...</span></div>
 </aside>
@@ -90,30 +90,36 @@ let state = { bookings: [], master: {}, page: 'dashboard' };
 const $ = id => document.getElementById(id);
 const statusCancelled = 'ยกเลิก (ระบุเหตุผลในหมายเหตุ)';
 
-// เรียก API ผ่าน fetch()
-async function callServer(action, params = {}) {
-  try {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...params })
-    });
-    
-    // Google Apps Script redirect กลับมาพร้อม JSON
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch(e) {
-      throw new Error('Server returned invalid response');
-    }
-    
-    if (data.error) throw new Error(data.error);
-    return data;
-  } catch (e) {
-    throw new Error(e.message || 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้');
-  }
+// เรียก API แบบ JSONP (ข้าม CORS ได้ ใช้ได้ทั้ง GitHub Pages และ Apps Script)
+function callServer(action, params = {}) {
+  return new Promise((resolve, reject) => {
+    const callbackName = 'jsonpCb_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+    const script = document.createElement('script');
+
+    const cleanup = () => {
+      if (window[callbackName]) delete window[callbackName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    };
+
+    window[callbackName] = (data) => {
+      cleanup();
+      if (data && data.error) reject(new Error(data.error));
+      else resolve(data);
+    };
+
+    const qs = new URLSearchParams();
+    qs.set('action', action);
+    qs.set('callback', callbackName);
+    Object.keys(params).forEach(k => qs.set(k, String(params[k])));
+
+    script.src = API_URL + '?' + qs.toString();
+    script.onerror = () => { cleanup(); reject(new Error('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้')); };
+    document.body.appendChild(script);
+
+    setTimeout(() => {
+      if (window[callbackName]) { cleanup(); reject(new Error('การเชื่อมต่อหมดเวลา กรุณาลองใหม่')); }
+    }, 30000);
+  });
 }
 
 function toast(msg, error = false) {
@@ -169,7 +175,7 @@ function listFor(key, fallback) {
 }
 
 function setOptions(sel, items, selected = '') {
-  sel.innerHTML = '<option value="">เลือก...</option>' + 
+  sel.innerHTML = '<option value="">เลือก...</option>' +
     items.map(v => `<option ${v === selected ? 'selected' : ''} value="${esc(v)}">${esc(v)}</option>`).join('');
 }
 
@@ -221,13 +227,13 @@ function renderDashboard() {
   $('mDelivered').textContent = num(active.filter(b => b.BookingStatus === 'ส่งมอบแล้ว').length);
   $('mPending').textContent = num(active.filter(b => String(b.BookingStatus).includes('รอส่งมอบ')).length);
   $('mNew').textContent = num(active.filter(b => String(b.BookingDate).slice(0, 7) === month).length);
-  
+
   const models = {}, statuses = {};
   active.forEach(b => {
     models[b.Model] = (models[b.Model] || 0) + 1;
     statuses[b.BookingStatus] = (statuses[b.BookingStatus] || 0) + 1;
   });
-  
+
   $('modelBars').innerHTML = barHtml(models);
   $('statusBars').innerHTML = barHtml(statuses);
   $('recentTable').innerHTML = tableHtml([...state.bookings].sort((a, b) => String(b.BookingDate).localeCompare(String(a.BookingDate))).slice(0, 8));
@@ -240,7 +246,7 @@ function renderBookings() {
     (!s || b.BookingStatus === s) &&
     (!m || b.Model === m)
   ).sort((a, b) => String(b.BookingDate).localeCompare(String(a.BookingDate)));
-  
+
   $('rowCount').textContent = `${num(rows.length)} รายการ`;
   $('bookingTable').innerHTML = tableHtml(rows, true);
 }
@@ -251,7 +257,7 @@ function renderReports() {
     const n = b.SalesConsultant || 'ไม่ระบุ';
     sales[n] = (sales[n] || 0) + 1;
   });
-  
+
   $('salesBars').innerHTML = barHtml(sales);
   const cancelled = state.bookings.length - active.length;
   $('reportSummary').innerHTML = `
@@ -296,7 +302,7 @@ window.removeBooking = async id => {
   const b = state.bookings.find(x => x.BookingID === id);
   if (!b || !confirm(`ยืนยันลบ Booking ของ ${b.CustomerName} (${b.Model})? การลบจะลบข้อมูลจาก Google Sheets จริง`)) return;
   try {
-    await callServer('deleteBooking', { id });
+    await callServer('deleteBooking', { id: id });
     toast('ลบรายการแล้ว');
     await load();
   } catch (e) {
@@ -334,7 +340,7 @@ $('bookingForm').addEventListener('submit', async e => {
   $('saveBtn').disabled = true;
   $('saveBtn').textContent = 'กำลังบันทึก...';
   try {
-    const r = await callServer('saveBooking', { payload });
+    const r = await callServer('saveBooking', { payload: JSON.stringify(payload) });
     toast(r.message);
     closeModal();
     await load();
