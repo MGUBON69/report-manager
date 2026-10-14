@@ -15,9 +15,9 @@
 <aside class="sidebar">
   <div class="brand">M2 <span style="color:#ff4050">MOTORSPORT</span><small>MG BOOKING CONTROL</small></div>
   <nav class="nav">
-    <button class="active" data-page="dashboard">▦　Dashboard</button>
-    <button data-page="bookings">▤　Booking ทั้งหมด</button>
-    <button data-page="reports">▥　รายงาน</button>
+    <button class="active" data-page="dashboard">▦ Dashboard</button>
+    <button data-page="bookings">▤ Booking ทั้งหมด</button>
+    <button data-page="reports">▥ รายงาน</button>
   </nav>
   <div class="side-note">ระบบจัดการ Booking สำหรับ MG<br>Google Sheets เป็นฐานข้อมูลหลัก<br><br><span id="connection">กำลังเชื่อมต่อ...</span></div>
 </aside>
@@ -82,109 +82,272 @@
 </div>
 <div id="toast" class="toast hidden"></div>
 <script>
-let state={bookings:[],master:{},page:'dashboard'};
-const $=id=>document.getElementById(id);
-const statusCancelled='ยกเลิก (ระบุเหตุผลในหมายเหตุ)';
-function callServer(fn,...args){
-  return new Promise((resolve,reject)=>{
-    if(!window.google||!google.script||!google.script.run){reject(new Error('ต้องเปิดผ่าน URL ของ Google Apps Script Web App ไม่ใช่เปิดไฟล์ HTML โดยตรง'));return}
-    google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(new Error(e&&e.message?e.message:String(e))))[fn](...args);
+// ==================== CONFIG ====================
+const API_URL = 'https://script.google.com/macros/s/AKfycbx_DcDCyBo46HyvWqxVJILavreVFn_Ul1ncGjE1Xm_DAxpP_XjZGu6IEjpJ6kGAZVQCdQ/exec';
+
+// ==================== STATE & HELPERS ====================
+let state = { bookings: [], master: {}, page: 'dashboard' };
+const $ = id => document.getElementById(id);
+const statusCancelled = 'ยกเลิก (ระบุเหตุผลในหมายเหตุ)';
+
+// เรียก API ผ่าน fetch()
+async function callServer(action, params = {}) {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...params })
+    });
+    
+    // Google Apps Script redirect กลับมาพร้อม JSON
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch(e) {
+      throw new Error('Server returned invalid response');
+    }
+    
+    if (data.error) throw new Error(data.error);
+    return data;
+  } catch (e) {
+    throw new Error(e.message || 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้');
+  }
+}
+
+function toast(msg, error = false) {
+  $('toast').textContent = msg;
+  $('toast').classList.remove('hidden', 'error');
+  if (error) $('toast').classList.add('error');
+  setTimeout(() => $('toast').classList.add('hidden'), 4200);
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function num(n) {
+  return Number(n || 0).toLocaleString('th-TH');
+}
+
+function statusClass(s) {
+  if (s === 'ส่งมอบแล้ว') return 'ok';
+  if (s === statusCancelled) return 'bad';
+  if (String(s).includes('รอส่งมอบ')) return 'warn';
+  return '';
+}
+
+function dateDisplay(s) {
+  if (!s) return '-';
+  const p = String(s).split('-');
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s;
+}
+
+async function load() {
+  document.body.classList.add('loading');
+  $('connection').textContent = 'กำลังโหลดข้อมูล...';
+  try {
+    const result = await callServer('getInitialData');
+    state.bookings = result.bookings || [];
+    state.master = result.master || {};
+    $('connection').textContent = 'เชื่อมต่อ Google Sheets แล้ว';
+    $('connection').style.color = '#9ce8c9';
+    populateSelects();
+    renderAll();
+  } catch (e) {
+    $('connection').textContent = 'เชื่อมต่อไม่สำเร็จ';
+    $('connection').style.color = '#ff9aa4';
+    toast(e.message, true);
+  } finally {
+    document.body.classList.remove('loading');
+  }
+}
+
+function listFor(key, fallback) {
+  return (state.master[key] && state.master[key].length) ? state.master[key] : fallback;
+}
+
+function setOptions(sel, items, selected = '') {
+  sel.innerHTML = '<option value="">เลือก...</option>' + 
+    items.map(v => `<option ${v === selected ? 'selected' : ''} value="${esc(v)}">${esc(v)}</option>`).join('');
+}
+
+function populateSelects() {
+  const f = $('bookingForm');
+  setOptions(f.elements.Model, listFor('Model', ['MG URBAN', 'MG4 MCE', 'MG S5 EV']));
+  setOptions(f.elements.SubModel, listFor('SubModel', ['STD', 'MAX', 'D', 'X']));
+  setOptions(f.elements.Color, listFor('Color', ['WHITE', 'GREY', 'BLACK', 'GREEN', 'BEIGE']));
+  setOptions(f.elements.Finance, listFor('Finance', ['เงินสด', 'KL กสิกร', 'AY กรุงศรี', 'TTB ธนชาต', 'TISCO']));
+  setOptions(f.elements.BookingStatus, listFor('BookingStatus', [
+    'จองใหม่', 'เตรียมเอกสาร รอเซ็นไฟแนนซ์ (ดาวน์15%ขึ้นไป)', 'ยื่นไฟแนนซ์แล้ว',
+    'ไฟแนนซ์อนุมัติแล้ว/เงินสด รอส่งมอบ (เดือนนี้)', 'ไฟแนนซ์อนุมัติแล้ว/เงินสด รอส่งมอบ (เดือนอื่น)',
+    'ส่งมอบแล้ว', statusCancelled
+  ]));
+  setOptions(f.elements.CarStatus, listFor('CarStatus', ['มีรถพร้อม', 'ไม่มีรถ', 'รอจัดสรร', 'รอเข้า']));
+  setOptions($('filterStatus'), [...new Set(state.bookings.map(b => b.BookingStatus).filter(Boolean))]);
+  setOptions($('filterModel'), [...new Set(state.bookings.map(b => b.Model).filter(Boolean))]);
+}
+
+function activeBookings() {
+  return state.bookings.filter(b => b.BookingStatus !== statusCancelled);
+}
+
+function renderAll() {
+  renderDashboard();
+  renderBookings();
+  renderReports();
+}
+
+function barHtml(obj) {
+  const entries = Object.entries(obj).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) return '<div class="empty">ยังไม่มีข้อมูล</div>';
+  const max = Math.max(...entries.map(e => e[1]), 1);
+  return entries.slice(0, 12).map(([name, value]) =>
+    `<div class="bar-row"><span title="${esc(name)}">${esc(name)}</span><div class="bar"><i style="width:${Math.max(2, value / max * 100)}%"></i></div><b>${num(value)}</b></div>`
+  ).join('');
+}
+
+function tableHtml(rows, actions = false) {
+  if (!rows.length) return '<div class="empty">ไม่พบข้อมูล Booking</div>';
+  return `<table><thead><tr><th>วันที่จอง</th><th>ชื่อลูกค้า</th><th>รุ่น / รุ่นย่อย</th><th>สี</th><th>สถานะ</th><th>SC</th>${actions ? '<th>จัดการ</th>' : ''}</tr></thead><tbody>${rows.map(b =>
+    `<tr><td>${dateDisplay(b.BookingDate)}</td><td><b>${esc(b.CustomerName)}</b><div class="muted">${esc(b.Finance)}</div></td><td>${esc(b.Model)}<div class="muted">${esc(b.SubModel)}</div></td><td>${esc(b.Color)}</td><td><span class="pill ${statusClass(b.BookingStatus)}">${esc(b.BookingStatus)}</span></td><td>${esc(b.SalesConsultant)}</td>${actions ? `<td><button class="linkbtn" onclick="editBooking('${esc(b.BookingID)}')">แก้ไข</button><button class="linkbtn" style="color:#c51e31" onclick="removeBooking('${esc(b.BookingID)}')">ลบ</button></td>` : ''}</tr>`
+  ).join('')}</tbody></table>`;
+}
+
+function renderDashboard() {
+  const active = activeBookings(), now = new Date(), month = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  $('mTotal').textContent = num(active.length);
+  $('mDelivered').textContent = num(active.filter(b => b.BookingStatus === 'ส่งมอบแล้ว').length);
+  $('mPending').textContent = num(active.filter(b => String(b.BookingStatus).includes('รอส่งมอบ')).length);
+  $('mNew').textContent = num(active.filter(b => String(b.BookingDate).slice(0, 7) === month).length);
+  
+  const models = {}, statuses = {};
+  active.forEach(b => {
+    models[b.Model] = (models[b.Model] || 0) + 1;
+    statuses[b.BookingStatus] = (statuses[b.BookingStatus] || 0) + 1;
   });
+  
+  $('modelBars').innerHTML = barHtml(models);
+  $('statusBars').innerHTML = barHtml(statuses);
+  $('recentTable').innerHTML = tableHtml([...state.bookings].sort((a, b) => String(b.BookingDate).localeCompare(String(a.BookingDate))).slice(0, 8));
 }
-function toast(msg,error=false){$('toast').textContent=msg;$('toast').classList.remove('hidden','error');if(error)$('toast').classList.add('error');setTimeout(()=>$('toast').classList.add('hidden'),4200)}
-function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function num(n){return Number(n||0).toLocaleString('th-TH')}
-function statusClass(s){if(s==='ส่งมอบแล้ว')return'ok';if(s===statusCancelled)return'bad';if(String(s).includes('รอส่งมอบ'))return'warn';return''}
-function dateDisplay(s){if(!s)return'-';const p=String(s).split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:s}
-async function load(){
-  document.body.classList.add('loading');$('connection').textContent='กำลังโหลดข้อมูล...';
-  try{
-    const result=await callServer('getInitialData');
-    state.bookings=result.bookings||[];state.master=result.master||{};
-    $('connection').textContent='เชื่อมต่อ Google Sheets แล้ว';$('connection').style.color='#9ce8c9';
-    populateSelects();renderAll();
-  }catch(e){$('connection').textContent='เชื่อมต่อไม่สำเร็จ';$('connection').style.color='#ff9aa4';toast(e.message,true)}
-  finally{document.body.classList.remove('loading')}
+
+function renderBookings() {
+  const q = $('search').value.trim().toLowerCase(), s = $('filterStatus').value, m = $('filterModel').value;
+  const rows = state.bookings.filter(b =>
+    (!q || [b.CustomerName, b.Model, b.SubModel, b.SalesConsultant, b.BookingID].some(v => String(v || '').toLowerCase().includes(q))) &&
+    (!s || b.BookingStatus === s) &&
+    (!m || b.Model === m)
+  ).sort((a, b) => String(b.BookingDate).localeCompare(String(a.BookingDate)));
+  
+  $('rowCount').textContent = `${num(rows.length)} รายการ`;
+  $('bookingTable').innerHTML = tableHtml(rows, true);
 }
-function listFor(key,fallback){return (state.master[key]&&state.master[key].length)?state.master[key]:fallback}
-function setOptions(sel,items,selected=''){sel.innerHTML='<option value="">เลือก...</option>'+items.map(v=>`<option ${v===selected?'selected':''} value="${esc(v)}">${esc(v)}</option>`).join('')}
-function populateSelects(){
- const f=$('bookingForm');
- setOptions(f.elements.Model,listFor('Model',['MG URBAN','MG4 MCE','MG S5 EV']));
- setOptions(f.elements.SubModel,listFor('SubModel',['STD','MAX','D','X']));
- setOptions(f.elements.Color,listFor('Color',['WHITE','GREY','BLACK','GREEN','BEIGE']));
- setOptions(f.elements.Finance,listFor('Finance',['เงินสด','KL กสิกร','AY กรุงศรี','TTB ธนชาต','TISCO']));
- setOptions(f.elements.BookingStatus,listFor('BookingStatus',['จองใหม่','เตรียมเอกสาร รอเซ็นไฟแนนซ์ (ดาวน์15%ขึ้นไป)','ยื่นไฟแนนซ์แล้ว','ไฟแนนซ์อนุมัติแล้ว/เงินสด รอส่งมอบ (เดือนนี้)','ไฟแนนซ์อนุมัติแล้ว/เงินสด รอส่งมอบ (เดือนอื่น)','ส่งมอบแล้ว',statusCancelled]));
- setOptions(f.elements.CarStatus,listFor('CarStatus',['มีรถพร้อม','ไม่มีรถ','รอจัดสรร','รอเข้า']));
- setOptions($('filterStatus'),[...new Set(state.bookings.map(b=>b.BookingStatus).filter(Boolean))]);
- setOptions($('filterModel'),[...new Set(state.bookings.map(b=>b.Model).filter(Boolean))]);
+
+function renderReports() {
+  const active = activeBookings(), sales = {};
+  active.forEach(b => {
+    const n = b.SalesConsultant || 'ไม่ระบุ';
+    sales[n] = (sales[n] || 0) + 1;
+  });
+  
+  $('salesBars').innerHTML = barHtml(sales);
+  const cancelled = state.bookings.length - active.length;
+  $('reportSummary').innerHTML = `
+    <p>Booking ทั้งหมด: <b>${num(state.bookings.length)}</b></p>
+    <p>รายการที่ยังใช้งาน: <b>${num(active.length)}</b></p>
+    <p>ส่งมอบแล้ว: <b>${num(active.filter(b => b.BookingStatus === 'ส่งมอบแล้ว').length)}</b></p>
+    <p>ยกเลิก: <b>${num(cancelled)}</b></p>
+    <p class="muted">ตัวเลขคำนวณจากข้อมูลที่โหลดจากชีต BK_M2_BOOKINGS ไม่ได้อ่านค่าจากสูตร Excel เดิม</p>
+  `;
 }
-function activeBookings(){return state.bookings.filter(b=>b.BookingStatus!==statusCancelled)}
-function renderAll(){renderDashboard();renderBookings();renderReports()}
-function barHtml(obj){
- const entries=Object.entries(obj).sort((a,b)=>b[1]-a[1]);if(!entries.length)return '<div class="empty">ยังไม่มีข้อมูล</div>';
- const max=Math.max(...entries.map(e=>e[1]),1);
- return entries.slice(0,12).map(([name,value])=>`<div class="bar-row"><span title="${esc(name)}">${esc(name)}</span><div class="bar"><i style="width:${Math.max(2,value/max*100)}%"></i></div><b>${num(value)}</b></div>`).join('');
+
+function goPage(page) {
+  state.page = page;
+  ['dashboard', 'bookings', 'reports'].forEach(p => $(p + 'Page').classList.toggle('hidden', p !== page));
+  document.querySelectorAll('.nav button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  $('pageTitle').textContent = ({ dashboard: 'Executive Dashboard', bookings: 'Booking Management', reports: 'รายงานผลงาน' })[page];
+  $('pageSubtitle').textContent = ({ dashboard: 'สรุปข้อมูลจาก Google Sheets', bookings: 'ค้นหา เพิ่ม แก้ไข และติดตามสถานะ Booking', reports: 'สรุปผลจากข้อมูล Booking ที่บันทึกจริง' })[page];
+  $('newBtn').classList.toggle('hidden', page === 'reports');
+  if (page === 'bookings') renderBookings();
 }
-function tableHtml(rows,actions=false){
- if(!rows.length)return '<div class="empty">ไม่พบข้อมูล Booking</div>';
- return `<table><thead><tr><th>วันที่จอง</th><th>ชื่อลูกค้า</th><th>รุ่น / รุ่นย่อย</th><th>สี</th><th>สถานะ</th><th>SC</th>${actions?'<th>จัดการ</th>':''}</tr></thead><tbody>${rows.map(b=>`<tr><td>${dateDisplay(b.BookingDate)}</td><td><b>${esc(b.CustomerName)}</b><div class="muted">${esc(b.Finance)}</div></td><td>${esc(b.Model)}<div class="muted">${esc(b.SubModel)}</div></td><td>${esc(b.Color)}</td><td><span class="pill ${statusClass(b.BookingStatus)}">${esc(b.BookingStatus)}</span></td><td>${esc(b.SalesConsultant)}</td>${actions?`<td><button class="linkbtn" onclick="editBooking('${esc(b.BookingID)}')">แก้ไข</button><button class="linkbtn" style="color:#c51e31" onclick="removeBooking('${esc(b.BookingID)}')">ลบ</button></td>`:''}</tr>`).join('')}</tbody></table>`;
+
+function openModal(record = null) {
+  const form = $('bookingForm');
+  form.reset();
+  form.elements.BookingID.value = record?.BookingID || '';
+  form.elements.BookingDate.value = record?.BookingDate || new Date().toISOString().slice(0, 10);
+  ['Model', 'SubModel', 'Color', 'Finance', 'BookingStatus', 'CarStatus'].forEach(k =>
+    setOptions(form.elements[k], listFor(k, []), record?.[k] || '')
+  );
+  ['CustomerName', 'SalesConsultant', 'Note'].forEach(k => form.elements[k].value = record?.[k] || '');
+  $('modalTitle').textContent = record ? 'แก้ไข Booking' : 'เพิ่ม Booking';
+  $('saveBtn').textContent = record ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล';
+  $('modal').classList.remove('hidden');
 }
-function renderDashboard(){
- const active=activeBookings(),now=new Date(),month=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
- $('mTotal').textContent=num(active.length);$('mDelivered').textContent=num(active.filter(b=>b.BookingStatus==='ส่งมอบแล้ว').length);
- $('mPending').textContent=num(active.filter(b=>String(b.BookingStatus).includes('รอส่งมอบ')).length);
- $('mNew').textContent=num(active.filter(b=>String(b.BookingDate).slice(0,7)===month).length);
- const models={},statuses={};active.forEach(b=>{models[b.Model]=(models[b.Model]||0)+1;statuses[b.BookingStatus]=(statuses[b.BookingStatus]||0)+1});
- $('modelBars').innerHTML=barHtml(models);$('statusBars').innerHTML=barHtml(statuses);
- $('recentTable').innerHTML=tableHtml([...state.bookings].sort((a,b)=>String(b.BookingDate).localeCompare(String(a.BookingDate))).slice(0,8));
-}
-function renderBookings(){
- const q=$('search').value.trim().toLowerCase(),s=$('filterStatus').value,m=$('filterModel').value;
- const rows=state.bookings.filter(b=>(!q||[b.CustomerName,b.Model,b.SubModel,b.SalesConsultant,b.BookingID].some(v=>String(v||'').toLowerCase().includes(q)))&&(!s||b.BookingStatus===s)&&(!m||b.Model===m)).sort((a,b)=>String(b.BookingDate).localeCompare(String(a.BookingDate)));
- $('rowCount').textContent=`${num(rows.length)} รายการ`;$('bookingTable').innerHTML=tableHtml(rows,true);
-}
-function renderReports(){
- const active=activeBookings(),sales={};active.forEach(b=>{const n=b.SalesConsultant||'ไม่ระบุ';sales[n]=(sales[n]||0)+1});
- $('salesBars').innerHTML=barHtml(sales);
- const cancelled=state.bookings.length-active.length;
- $('reportSummary').innerHTML=`<p>Booking ทั้งหมด: <b>${num(state.bookings.length)}</b></p><p>รายการที่ยังใช้งาน: <b>${num(active.length)}</b></p><p>ส่งมอบแล้ว: <b>${num(active.filter(b=>b.BookingStatus==='ส่งมอบแล้ว').length)}</b></p><p>ยกเลิก: <b>${num(cancelled)}</b></p><p class="muted">ตัวเลขคำนวณจากข้อมูลที่โหลดจากชีต BK_M2_BOOKINGS ไม่ได้อ่านค่าจากสูตร Excel เดิม</p>`;
-}
-function goPage(page){
- state.page=page;['dashboard','bookings','reports'].forEach(p=>$(p+'Page').classList.toggle('hidden',p!==page));
- document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
- $('pageTitle').textContent=({dashboard:'Executive Dashboard',bookings:'Booking Management',reports:'รายงานผลงาน'})[page];
- $('pageSubtitle').textContent=({dashboard:'สรุปข้อมูลจาก Google Sheets',bookings:'ค้นหา เพิ่ม แก้ไข และติดตามสถานะ Booking',reports:'สรุปผลจากข้อมูล Booking ที่บันทึกจริง'})[page];
- $('newBtn').classList.toggle('hidden',page==='reports');
- if(page==='bookings')renderBookings();
-}
-function openModal(record=null){
- const form=$('bookingForm');form.reset();
- form.elements.BookingID.value=record?.BookingID||'';
- form.elements.BookingDate.value=record?.BookingDate||new Date().toISOString().slice(0,10);
- ['Model','SubModel','Color','Finance','BookingStatus','CarStatus'].forEach(k=>setOptions(form.elements[k],listFor(k,[]),record?.[k]||''));
- ['CustomerName','SalesConsultant','Note'].forEach(k=>form.elements[k].value=record?.[k]||'');
- $('modalTitle').textContent=record?'แก้ไข Booking':'เพิ่ม Booking';$('saveBtn').textContent=record?'บันทึกการแก้ไข':'บันทึกข้อมูล';$('modal').classList.remove('hidden');
-}
-window.editBooking=id=>{const b=state.bookings.find(x=>x.BookingID===id);if(b)openModal(b)};
-window.removeBooking=async id=>{
- const b=state.bookings.find(x=>x.BookingID===id);if(!b||!confirm(`ยืนยันลบ Booking ของ ${b.CustomerName} (${b.Model})? การลบจะลบข้อมูลจาก Google Sheets จริง`))return;
- try{await callServer('deleteBooking',id);toast('ลบรายการแล้ว');await load()}catch(e){toast(e.message,true)}
+
+window.editBooking = id => {
+  const b = state.bookings.find(x => x.BookingID === id);
+  if (b) openModal(b);
 };
-function closeModal(){$('modal').classList.add('hidden')}
-document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>goPage(b.dataset.page)));
-$('refreshBtn').addEventListener('click',load);$('newBtn').addEventListener('click',()=>openModal());
-$('closeModal').addEventListener('click',closeModal);$('cancelModal').addEventListener('click',closeModal);
-$('search').addEventListener('input',renderBookings);$('filterStatus').addEventListener('change',renderBookings);$('filterModel').addEventListener('change',renderBookings);
-$('clearFilter').addEventListener('click',()=>{$('search').value='';$('filterStatus').value='';$('filterModel').value='';renderBookings()});
-$('bookingForm').addEventListener('submit',async e=>{
- e.preventDefault();const form=e.currentTarget,payload=Object.fromEntries(new FormData(form).entries());
- if(!/^MG/i.test(payload.Model)){toast('ระบบนี้รองรับเฉพาะแบรนด์ MG',true);return}
- $('saveBtn').disabled=true;$('saveBtn').textContent='กำลังบันทึก...';
- try{const r=await callServer('saveBooking',payload);toast(r.message);closeModal();await load();goPage('bookings')}
- catch(err){toast(err.message,true)}
- finally{$('saveBtn').disabled=false;$('saveBtn').textContent=payload.BookingID?'บันทึกการแก้ไข':'บันทึกข้อมูล'}
+
+window.removeBooking = async id => {
+  const b = state.bookings.find(x => x.BookingID === id);
+  if (!b || !confirm(`ยืนยันลบ Booking ของ ${b.CustomerName} (${b.Model})? การลบจะลบข้อมูลจาก Google Sheets จริง`)) return;
+  try {
+    await callServer('deleteBooking', { id });
+    toast('ลบรายการแล้ว');
+    await load();
+  } catch (e) {
+    toast(e.message, true);
+  }
+};
+
+function closeModal() {
+  $('modal').classList.add('hidden');
+}
+
+// ==================== EVENT LISTENERS ====================
+document.querySelectorAll('.nav button').forEach(b => b.addEventListener('click', () => goPage(b.dataset.page)));
+$('refreshBtn').addEventListener('click', load);
+$('newBtn').addEventListener('click', () => openModal());
+$('closeModal').addEventListener('click', closeModal);
+$('cancelModal').addEventListener('click', closeModal);
+$('search').addEventListener('input', renderBookings);
+$('filterStatus').addEventListener('change', renderBookings);
+$('filterModel').addEventListener('change', renderBookings);
+$('clearFilter').addEventListener('click', () => {
+  $('search').value = '';
+  $('filterStatus').value = '';
+  $('filterModel').value = '';
+  renderBookings();
 });
+
+$('bookingForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const form = e.currentTarget, payload = Object.fromEntries(new FormData(form).entries());
+  if (!/^MG/i.test(payload.Model)) {
+    toast('ระบบนี้รองรับเฉพาะแบรนด์ MG', true);
+    return;
+  }
+  $('saveBtn').disabled = true;
+  $('saveBtn').textContent = 'กำลังบันทึก...';
+  try {
+    const r = await callServer('saveBooking', { payload });
+    toast(r.message);
+    closeModal();
+    await load();
+    goPage('bookings');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    $('saveBtn').disabled = false;
+    $('saveBtn').textContent = payload.BookingID ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูล';
+  }
+});
+
+// เริ่มโหลดข้อมูล
 load();
 </script>
 </body>
