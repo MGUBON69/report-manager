@@ -64,7 +64,8 @@
   <div class="dialog">
     <div class="dialog-head"><h2 id="modalTitle">เพิ่ม Booking</h2><button class="secondary" id="closeModal">✕</button></div>
     <form id="bookingForm">
-      <input type="hidden" name="id"> 
+      <!-- Hidden ID ใช้สำหรับเช็คว่าเป็นการแก้ไขหรือเพิ่มใหม่ -->
+      <input type="hidden" name="id" value=""> 
       <div class="formgrid">
         <div class="formfield"><label>วันที่จอง *</label><input class="field" name="BookingDate" type="date" required></div>
         <div class="formfield"><label>ชื่อลูกค้า *</label><input class="field" name="CustomerName" maxlength="150" required></div>
@@ -99,7 +100,6 @@ const firebaseConfig = {
   measurementId: "G-2JGHD1PQQW"
 };
 
-// Initialize Firebase
 let db;
 try {
   const app = initializeApp(firebaseConfig);
@@ -168,9 +168,7 @@ const MASTER_DATA = {
   CarStatus: ['มีรถพร้อม', 'ไม่มีรถ', 'รอจัดสรร', 'รอเข้า']
 };
 
-function listFor(key) {
-  return MASTER_DATA[key] || [];
-}
+function listFor(key) { return MASTER_DATA[key] || []; }
 
 function setOptions(sel, items, selected = '') {
   sel.innerHTML = '<option value="">เลือก...</option>' +
@@ -204,8 +202,6 @@ async function load() {
   }
 
   try {
-    // 🔧 แก้ไขสำคัญ: เอา orderBy ออกเพื่อป้องกัน Error "Missing Index" 
-    // แล้วค่อยมา sort ด้วย JavaScript แทน ซึ่งเสถียรกว่าสำหรับแอปขนาดเล็ก
     const q = query(collection(db, "bookings"));
     const querySnapshot = await getDocs(q);
     
@@ -214,7 +210,6 @@ async function load() {
       data.push({ id: docSnap.id, ...docSnap.data() });
     });
     
-    // Sort ข้อมูลด้วย JavaScript (เรียงจากใหม่ไปเก่า ตาม createdAt หรือ BookingDate)
     data.sort((a, b) => {
       const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || a.BookingDate || 0);
       const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || b.BookingDate || 0);
@@ -333,7 +328,7 @@ function renderReports() {
   `;
 }
 
-// ==================== GLOBAL FUNCTIONS (สำหรับ onclick ใน HTML) ====================
+// ==================== GLOBAL FUNCTIONS ====================
 window.goPage = function(page) {
   window.state.page = page;
   ['dashboard', 'bookings', 'reports'].forEach(p => $(p + 'Page').classList.toggle('hidden', p !== page));
@@ -346,10 +341,11 @@ window.goPage = function(page) {
 
 window.openModal = function(record = null) {
   const form = $('bookingForm');
-  form.reset();
+  form.reset(); // รีเซ็ตฟอร์มก่อน
   
   if (record) {
-    form.elements.id.value = record.id;
+    // === โหมดแก้ไข ===
+    form.elements.id.value = record.id; // ใส่ ID เดิมลงไป
     form.elements.BookingDate.value = toInputDate(record.BookingDate);
     form.elements.CustomerName.value = record.CustomerName || '';
     form.elements.Model.value = record.Model || '';
@@ -364,7 +360,8 @@ window.openModal = function(record = null) {
     $('modalTitle').textContent = 'แก้ไข Booking';
     $('saveBtn').textContent = 'บันทึกการแก้ไข';
   } else {
-    form.elements.id.value = '';
+    // === โหมดเพิ่มใหม่ ===
+    form.elements.id.value = ''; // เคลียร์ ID ให้ว่าง เพื่อให้ระบบรู้ว่านี่คือการสร้างใหม่
     form.elements.BookingDate.value = new Date().toISOString().slice(0, 10);
     $('modalTitle').textContent = 'เพิ่ม Booking';
     $('saveBtn').textContent = 'บันทึกข้อมูล';
@@ -412,12 +409,21 @@ $('clearFilter').addEventListener('click', () => {
   renderBookings();
 });
 
+// 🔧 จุดที่แก้ไขสำคัญ: จัดการการ Submit ให้แยก "แก้ไข" กับ "เพิ่มใหม่" อย่างชัดเจน
 $('bookingForm').addEventListener('submit', async e => {
   e.preventDefault();
   const form = e.currentTarget;
   const formData = new FormData(form);
+  
+  // 1. ดึง id ออกมาก่อน (เพื่อใช้เช็คว่าเป็นเอกสารไหน)
+  const docId = formData.get('id'); 
+  
+  // 2. แปลงข้อมูลอื่นๆ เป็น Object
   const payload = Object.fromEntries(formData.entries());
   
+  // 3. ลบ id ออกจาก payload เพื่อไม่ให้มันถูกบันทึกเป็น field ซ้ำซ้อนใน Firestore
+  delete payload.id; 
+
   if (!/^MG/i.test(payload.Model)) {
     toast('ระบบนี้รองรับเฉพาะแบรนด์ MG', true);
     return;
@@ -427,26 +433,30 @@ $('bookingForm').addEventListener('submit', async e => {
   $('saveBtn').textContent = 'กำลังบันทึก...';
   
   try {
-    const id = form.elements.id.value;
     const dataToSave = {
       ...payload,
       updatedAt: Timestamp.now()
     };
     
-    if (id) {
-      await updateDoc(doc(db, "bookings", id), dataToSave);
-      toast('อัปเดตข้อมูลเรียบร้อย');
-    } else {
+    // 4. เช็กเงื่อนไข: ถ้ามี docId แสดงว่าเป็นการ "แก้ไข" (Update)
+    if (docId && docId.trim() !== '') {
+      console.log("🔄 Updating existing document ID:", docId);
+      await updateDoc(doc(db, "bookings", docId), dataToSave);
+      toast('✅ อัปเดตข้อมูลเรียบร้อย (ไม่สร้างรายการใหม่)');
+    } 
+    // 5. ถ้าไม่มี docId แสดงว่าเป็นการ "เพิ่มใหม่" (Create)
+    else {
+      console.log("➕ Creating new document");
       dataToSave.createdAt = Timestamp.now();
       await addDoc(collection(db, "bookings"), dataToSave);
-      toast('บันทึกข้อมูลใหม่แล้ว');
+      toast('✅ บันทึกข้อมูลใหม่แล้ว');
     }
     
     closeModal();
     await load();
     window.goPage('bookings');
   } catch (err) {
-    console.error(err);
+    console.error("❌ Save error:", err);
     toast('บันทึกไม่สำเร็จ: ' + err.message, true);
   } finally {
     $('saveBtn').disabled = false;
@@ -454,7 +464,6 @@ $('bookingForm').addEventListener('submit', async e => {
   }
 });
 
-// เริ่มโหลดข้อมูลเมื่อเปิดหน้าเว็บ
 load();
 </script>
 </body>
