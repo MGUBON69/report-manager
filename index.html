@@ -28,9 +28,16 @@
     <button class="active" data-page="dashboard">▦ Dashboard</button>
     <button data-page="bookings">▤ Booking ทั้งหมด</button>
     <button data-page="reports">▥ รายงานเชิงลึก</button>
+    
+    <!-- 🔗 ปุ่มดู Stock MG (แก้ไขลิงค์ตรง onclick ด้านล่างนี้) -->
+    <button onclick="window.open('https://ใส่ลิงค์_Stock_MG_ของคุณ_ตรงนี้', '_blank')" style="margin-top:12px; border-top:1px solid #2a3f63; padding-top:12px; color:#9ce8c9;">
+      🚗 ดู Stock MG
+    </button>
   </nav>
+  
   <div class="side-note">ระบบจัดการ Booking สำหรับ MG<br>ฐานข้อมูล: Firebase Firestore<br><br><span id="connection">กำลังเชื่อมต่อ...</span></div>
 </aside>
+
 <main class="main">
   <header class="top">
     <div><div class="eyebrow">DEALER BOOKING SYSTEM</div><h1 id="pageTitle">Executive Dashboard</h1><div class="muted" id="pageSubtitle">สรุปข้อมูลจากระบบหลังบ้าน Firebase</div></div>
