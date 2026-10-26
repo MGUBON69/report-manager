@@ -224,7 +224,8 @@ const MASTER_DATA = {
   Model: ['MG URBAN', 'MG4 MCE', 'MG S5 EV', 'MG IM5', 'MG5 PRO', 'MG ZS', 'MG MAXUS7', 'MG MAXUS9', 'MG3 HYBRID'],
   SubModel: ['STD', 'MAX', 'D', 'X', 'C', 'V', 'D+', 'X+', 'V+', 'PERFORMANCE', 'LR', 'PREMIUM'],
   Color: ['WHITE', 'GREY', 'BLACK', 'GREEN', 'BEIGE', 'RED', 'BLUE', 'TITANIUM'],
-  Finance: ['เงินสด', 'KL กสิกร', 'AY กรุงศรี', 'TTB ธนชาต', 'TISCO', 'UOB', 'SCB'],
+  // ลบ UOB ออกแล้ว
+  Finance: ['เงินสด', 'KL กสิกร', 'AY กรุงศรี', 'TTB ธนชาต', 'TISCO', 'SCB'],
   BookingStatus: ['จองใหม่', 'เตรียมเอกสาร รอเซ็นไฟแนนซ์ (ดาวน์15%ขึ้นไป)', 'ยื่นไฟแนนซ์แล้ว', 'ไฟแนนซ์อนุมัติแล้ว/เงินสด รอส่งมอบ (เดือนนี้)', 'ไฟแนนซ์อนุมัติแล้ว/เงินสด รอส่งมอบ (เดือนอื่น)', 'ส่งมอบแล้ว', statusCancelled],
   CarStatus: ['มีรถพร้อม', 'ไม่มีรถ', 'รอจัดสรร', 'รอเข้า']
 };
@@ -351,11 +352,29 @@ function renderReports() {
 
   const statusColors = ['#1769e0', '#3b82f6', '#a76600', '#16835e', '#68758b', '#e62d3f'];
   const modelColors = ['#10213d', '#1769e0', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe'];
-  const financeColors = ['#e62d3f', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280'];
+  
+  // กำหนดสีตามชื่อสถาบันการเงินโดยตรง (รองรับทั้งชื่อเต็มและชื่อย่อ/พิมพ์ผิด)
+  const financeColorMap = {
+    'เงินสด': '#e62d3f',   // แดง
+    'KL กสิกร': '#16835e', // เขียว
+    'กสิกร': '#16835e',
+    'AY กรุงศรี': '#f59e0b', // เหลือง
+    'กรุงศรี': '#f59e0b',
+    'TTB ธนชาต': '#f97316', // ส้ม
+    'ธนชาต': '#f97316',
+    'ธนชาติ': '#f97316', // เผื่อพิมพ์ผิด
+    'TISCO': '#1769e0',    // น้ำเงิน
+    'SCB': '#8b5cf6'       // ม่วง
+  };
+
+  const financeLabels = Object.keys(financeCounts);
+  const financeValues = Object.values(financeCounts);
+  // Map สีตามชื่อ หากไม่ตรงกับที่กำหนดไว้จะใช้สีเทา (#94a3b8) เป็นค่าเริ่มต้น
+  const financeColors = financeLabels.map(label => financeColorMap[label] || '#94a3b8');
 
   createChart('statusChart', 'doughnut', Object.keys(statusCounts), Object.values(statusCounts), statusColors, 'status');
   createChart('modelChart', 'pie', Object.keys(modelCounts), Object.values(modelCounts), modelColors, 'model');
-  createChart('financeChart', 'doughnut', Object.keys(financeCounts), Object.values(financeCounts), financeColors, 'finance');
+  createChart('financeChart', 'doughnut', financeLabels, financeValues, financeColors, 'finance');
 
   const scStats = {};
   all.forEach(b => {
