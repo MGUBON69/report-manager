@@ -33,7 +33,7 @@
     <button data-page="bookings">▤ Booking ทั้งหมด</button>
     <button data-page="reports">▥ รายงานเชิงลึก</button>
     <button data-page="stock">▣ Stock MG</button>
-    <button data-page="officeDay">▧ Office Day</button>
+    <button data-page="officeDay">▧ Marketing manager</button>
   </nav>
   
   <div class="side-note">ระบบจัดการ Booking สำหรับ MG<br>ฐานข้อมูล: Firebase Firestore<br><br><span id="connection">กำลังเชื่อมต่อ...</span></div>
@@ -120,7 +120,7 @@
   <section id="officeDayPage" class="hidden">
     <div class="panel" style="padding: 0; overflow: hidden; height: calc(100vh - 120px);">
       <div class="panel-head" style="padding: 18px 18px 0 18px;">
-        <h2>ระบบ Office Day</h2>
+        <h2>ระบบจัดการ ด้านการตลาด</h2>
         <button class="secondary" onclick="window.open('https://shinichi69-app.github.io/office-day/', '_blank')">เปิดในแท็บใหม่ ↗</button>
       </div>
       <iframe src="https://shinichi69-app.github.io/office-day/" class="embed-frame" title="Office Day System"></iframe>
@@ -404,14 +404,14 @@ window.goPage = function(page) {
     bookings: 'Booking Management', 
     reports: 'รายงานเชิงลึก',
     stock: 'Stock MG',
-    officeDay: 'Office Day'
+    officeDay: 'Marketing manager'
   };
   const subtitles = { 
     dashboard: 'สรุปข้อมูลเรียลไทม์', 
     bookings: 'จัดการข้อมูล Booking', 
     reports: 'วิเคราะห์ข้อมูลและผลงานการขาย',
     stock: 'จัดการสต็อกรถยนต์ MG (Embedded)',
-    officeDay: 'ระบบจัดการ Office Day (Embedded)'
+    officeDay: 'ระบบจัดการ ด้านการตลาด (Embedded)'
   };
   
   $('pageTitle').textContent = titles[page] || 'Dashboard';
